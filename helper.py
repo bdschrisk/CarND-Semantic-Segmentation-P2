@@ -138,3 +138,28 @@ def save_inference_samples(runs_dir, data_dir, sess, image_shape, logits, keep_p
         sess, logits, keep_prob, input_image, os.path.join(data_dir, 'data_road/testing'), image_shape)
     for name, image in image_outputs:
         scipy.misc.imsave(os.path.join(output_dir, name), image)
+
+### HELPERS ###
+
+# Print number of trainable params (http://stackoverflow.com/a/39936930/5491223)
+
+def count_number_trainable_params():
+    '''
+    Counts the number of trainable variables.
+    '''
+    tot_nb_params = 0
+    for trainable_variable in tf.trainable_variables():
+        shape = trainable_variable.get_shape() # e.g [D,F] or [W,H,C]
+        current_nb_params = get_nb_params_shape(shape)
+        tot_nb_params = tot_nb_params + current_nb_params
+    return tot_nb_params
+
+def get_nb_params_shape(shape):
+    '''
+    Computes the total number of params for a given shap.
+    Works for any number of shapes etc [D,F] or [W,H,C] computes D*F and W*H*C.
+    '''
+    nb_params = 1
+    for dim in shape:
+        nb_params = nb_params*int(dim)
+    return nb_params
