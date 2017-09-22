@@ -33,6 +33,7 @@ def load_vgg(sess, vgg_path):
     vgg_layer7_out_tensor_name = 'layer7_out:0'
     # restore model graph and weights
     tf.saved_model.loader.load(sess, [vgg_tag], vgg_path)
+    
     # load saved model
     default_graph = tf.get_default_graph()
 
@@ -56,41 +57,46 @@ def layers(vgg_layer3_out, vgg_layer4_out, vgg_layer7_out, num_classes, dropout)
     :param num_classes: Number of classes to classify
     :return: The Tensor for the last layer of output
     """
-    # TODO: Implement function
     # define initialisaton
-    xavier_init = tf.contrib.layers.xavier_initializer()
-    l2_regularizer = tf.contrib.layers.l2_regularizer(1e-4)
+    kernel_init = tf.truncated_normal_initializer(stddev=0.01)
+    l2_regularizer = tf.contrib.layers.l2_regularizer(1.0e-3)
+
+    kernelsize = (1, 1)
+    stride = (1, 1)
 
     # define convolutional layers with dropout and relu
-    l7_conv_1x1 = tf.layers.conv2d(vgg_layer7_out, num_classes, 1, padding='same',
-                                kernel_initializer = xavier_init,
+    l7_conv_1x1 = tf.layers.conv2d(vgg_layer7_out, num_classes, 
+                                kernel_size=kernelsize, strides=stride, padding='same',
+                                kernel_initializer = kernel_init,
                                 kernel_regularizer = l2_regularizer)
-    l7_activation = tf.nn.relu(l7_conv_1x1)
-    l7_dropout = tf.layers.dropout(l7_activation, rate = dropout)
+    #l7_conv_1x1 = tf.nn.relu(l7_conv_1x1)
+    #l7_conv_1x1 = tf.nn.dropout(l7_conv_1x1, keep_prob = dropout)
 
-    l4_conv_1x1 = tf.layers.conv2d(vgg_layer4_out, num_classes, 1, padding='same',
-                                kernel_initializer = xavier_init,
+    l4_conv_1x1 = tf.layers.conv2d(vgg_layer4_out, num_classes, 
+                                kernel_size=kernelsize, strides=stride, padding='same',
+                                kernel_initializer = kernel_init,
                                 kernel_regularizer = l2_regularizer)
-    l4_activation = tf.nn.relu(l4_conv_1x1)
-    l4_dropout = tf.layers.dropout(l4_activation, rate = dropout)
+    #l4_conv_1x1 = tf.nn.relu(l4_conv_1x1)
+    #l4_conv_1x1 = tf.nn.dropout(l4_conv_1x1, keep_prob = dropout)
 
-    l3_conv_1x1 = tf.layers.conv2d(vgg_layer3_out, num_classes, 1, padding='same',
-                                kernel_initializer = xavier_init,
+    l3_conv_1x1 = tf.layers.conv2d(vgg_layer3_out, num_classes, 
+                                kernel_size=kernelsize, strides=stride, padding='same',
+                                kernel_initializer = kernel_init,
                                 kernel_regularizer = l2_regularizer)
-    l3_activation = tf.nn.relu(l3_conv_1x1)
-    l3_dropout = tf.layers.dropout(l3_activation, rate = dropout)
+    #l3_conv_1x1 = tf.nn.relu(l3_conv_1x1)
+    #l3_conv_1x1 = tf.nn.dropout(l3_conv_1x1, keep_prob = dropout)
 
     # Define fully convolutional layers
     # Upsample layer 7 and combine with layer 4
-    fcn = tf.layers.conv2d_transpose(l7_dropout, num_classes, 4, 2, padding='same', kernel_initializer = xavier_init)
-    fcn = tf.add(fcn, l4_dropout)
+    fcn = tf.layers.conv2d_transpose(l7_conv_1x1, num_classes, 4, 2, padding='same', kernel_initializer = kernel_init)
+    fcn = tf.add(fcn, l4_conv_1x1)
 
     # Upsample network and combine with layer 3
-    fcn = tf.layers.conv2d_transpose(fcn, num_classes, 4, 2, padding='same', kernel_initializer = xavier_init)
-    fcn = tf.add(fcn, l3_dropout)
+    fcn = tf.layers.conv2d_transpose(fcn, num_classes, 4, 2, padding='same', kernel_initializer = kernel_init)
+    fcn = tf.add(fcn, l3_conv_1x1)
 
     # Upsample network
-    fcn = tf.layers.conv2d_transpose(fcn, num_classes, 16, 8, padding='same', kernel_initializer = xavier_init)
+    fcn = tf.layers.conv2d_transpose(fcn, num_classes, 16, 8, padding='same', kernel_initializer = kernel_init)
 
     return fcn
 tests.test_layers(layers)
@@ -110,7 +116,7 @@ def optimize(nn_last_layer, correct_label, learning_rate, num_classes):
     ground_truth = tf.reshape(correct_label, (-1, num_classes))
 
     # Softmax with cross entropy loss
-    softmax_logits = tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels = ground_truth)
+    softmax_logits = tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=ground_truth)
     cross_entropy_loss = tf.reduce_mean(softmax_logits)
 
     # Optimise using Adam
@@ -139,6 +145,9 @@ def train_nn(sess, epochs, batch_size, get_batches_fn, train_op, cross_entropy_l
     print("Training...\n")
 
     for epoch in range(epochs):
+
+        keep_prob_rate = min(keep_prob_rate * 1.05, 1.0)
+
         print("Epoch {} of {}...".format(epoch, epochs))
 
         for batch, (images, labels) in enumerate(get_batches_fn(batch_size)):
@@ -180,8 +189,8 @@ def run():
 
     with tf.Session() as sess:
         # Define vars
-        epochs = 20
-        batch_size = 2
+        epochs = 40
+        batch_size = 8
         keep_prob_rate = 0.5
 
         # Define placeholders
@@ -228,10 +237,12 @@ def run():
         train_nn(sess, epochs, batch_size, get_batches_fn, train_op, cross_entropy_loss, 
                  input, correct_label, dropout, keep_prob_rate, learning_rate)
 
+        # save model
+        saver.save(sess, model_path, global_step=epochs)
         # OPTIONAL: Apply the trained model to a video
 
         # Save inference data using helper.save_inference_samples
-        helper.save_inference_samples(runs_dir, data_dir, sess, image_shape, logits, dropout, input_image)
+        helper.save_inference_samples(runs_dir, data_dir, sess, image_shape, logits, dropout, input)
 
 
 if __name__ == '__main__':
